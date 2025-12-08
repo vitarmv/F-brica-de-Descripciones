@@ -54,7 +54,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- TU CLAVE API ---
-api_key = "TU_CLAVE_AIza_AQUI"  # <--- PEGA TU CLAVE REAL AQUÍ
+api_key = 'AIzaSyBlS31KHG75KBRUiuk5MJjz99uE8heuvko'  # <--- PEGA TU CLAVE REAL AQUÍ
 
 # --- LÓGICA DE PROCESAMIENTO ---
 def procesar_fila(producto, tono, model):
