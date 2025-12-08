@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 import time
+import io  
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Bulk AI Processor", page_icon="✨", layout="centered")
@@ -139,18 +140,25 @@ else:
                 status_text.text("✅ ¡Procesamiento completado!")
                 progress_bar.progress(100)
 
-                # 4. DESCARGA
+               # 4. DESCARGA EN EXCEL (XLSX)
                 st.balloons()
                 st.write("### Tus resultados están listos:")
                 
-                # Convertir a CSV para descargar
-                csv = df.to_csv(index=False).encode('utf-8')
+                # Crear un buffer de memoria para el Excel
+                output = io.BytesIO()
+                
+                # Escribir el DataFrame en formato Excel nativo
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Descripciones_IA')
+                
+                # Obtener el valor binario
+                excel_data = output.getvalue()
                 
                 st.download_button(
-                    label="📥 Descargar Archivo Completo",
-                    data=csv,
-                    file_name='productos_con_ia.csv',
-                    mime='text/csv',
+                    label="📥 Descargar Excel (.xlsx)",
+                    data=excel_data,
+                    file_name='productos_con_ia.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 )
 
         except Exception as e:
