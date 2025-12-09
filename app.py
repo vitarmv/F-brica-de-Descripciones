@@ -62,11 +62,29 @@ def procesar_fila(producto, tono, model):
     """Esta función es el 'obrero' que procesa cada fila individualmente"""
     try:
         prompt = f"""
-        Actúa como experto en E-commerce. Escribe una descripción de producto corta (máx 50 palabras) y persuasiva para: {producto}.
-        Tono: {tono}. Incluye beneficios clave. Sin hashtags.
+        Actúa como experto en E-commerce.
+        TAREA: Escribe una descripción de producto corta (máx 50 palabras) para: {producto}.
+        TONO: {tono}.
+        
+        REGLAS OBLIGATORIAS DE FORMATO:
+        1. Entrega SOLAMENTE el texto de la descripción.
+        2. NO repitas el nombre del producto al inicio.
+        3. NO uses formato markdown (ni negritas **, ni guiones -).
+        4. NO saludes ni des introducciones (ej: "Aquí tienes la descripción").
+        5. Empieza directamente con el beneficio o característica.
         """
+        
         response = model.generate_content(prompt)
-        return response.text
+        
+        # Limpieza extra con Python (por si la IA desobedece)
+        texto_limpio = response.text.replace('**', '').replace('##', '').strip()
+        
+        # Si la IA repitió el nombre al inicio, lo intentamos quitar (opcional)
+        if texto_limpio.lower().startswith(producto.lower()):
+            texto_limpio = texto_limpio[len(producto):].strip(" -:.")
+            
+        return texto_limpio
+        
     except Exception as e:
         return "Error al generar"
 
