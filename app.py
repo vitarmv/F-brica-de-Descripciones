@@ -59,34 +59,37 @@ api_key = 'AIzaSyBlS31KHG75KBRUiuk5MJjz99uE8heuvko'  # <--- PEGA TU CLAVE REAL A
 
 # --- LÓGICA DE PROCESAMIENTO ---
 def procesar_fila(producto, tono, model):
-    """Esta función es el 'obrero' que procesa cada fila individualmente"""
-    try:
-        prompt = f"""
-        Actúa como experto en E-commerce.
-        TAREA: Escribe una descripción de producto corta (máx 50 palabras) para: {producto}.
-        TONO: {tono}.
-        
-        REGLAS OBLIGATORIAS DE FORMATO:
-        1. Entrega SOLAMENTE el texto de la descripción.
-        2. NO repitas el nombre del producto al inicio.
-        3. NO uses formato markdown (ni negritas **, ni guiones -).
-        4. NO saludes ni des introducciones (ej: "Aquí tienes la descripción").
-        5. Empieza directamente con el beneficio o característica.
-        """
-        
-        response = model.generate_content(prompt)
-        
-        # Limpieza extra con Python (por si la IA desobedece)
-        texto_limpio = response.text.replace('**', '').replace('##', '').strip()
-        
-        # Si la IA repitió el nombre al inicio, lo intentamos quitar (opcional)
-        if texto_limpio.lower().startswith(producto.lower()):
-            texto_limpio = texto_limpio[len(producto):].strip(" -:.")
+    """Procesa una fila con reintentos automáticos si falla"""
+    max_intentos = 3
+    
+    for intento in range(max_intentos):
+        try:
+            prompt = f"""
+            Actúa como experto en E-commerce.
+            TAREA: Escribe una descripción de producto corta (máx 50 palabras) para: {producto}.
+            TONO: {tono}.
+            REGLAS: Solo texto, sin repetir título, sin markdown, directo al beneficio.
+            """
             
-        return texto_limpio
-        
-    except Exception as e:
-        return "Error al generar"
+            response = model.generate_content(prompt)
+            
+            # Limpieza básica
+            texto = response.text.replace('**', '').replace('##', '').strip()
+            if texto.lower().startswith(producto.lower()):
+                texto = texto[len(producto):].strip(" -:.")
+                
+            return texto
+            
+        except Exception as e:
+            # Si falla, esperamos antes de reintentar (Backoff)
+            tiempo_espera = (intento + 1) * 5  # Espera 5s, luego 10s...
+            time.sleep(tiempo_espera)
+            
+            # Si fue el último intento, devolvemos el error real para saber qué pasó
+            if intento == max_intentos - 1:
+                return f"Error: {e}"
+                
+    return "Error desconocido"
 
 # --- INTERFAZ DE USUARIO ---
 st.title("✨ Fábrica de Contenido AI")
@@ -150,7 +153,7 @@ else:
                     progress_bar.progress((index + 1) / total_filas)
                     
                     # Pequeña pausa para no saturar la API (Rate Limits)
-                    time.sleep(0.5) 
+                    time.sleep(2) 
 
                 # Guardar resultados en el DataFrame
                 df['Descripción_IA'] = resultados
