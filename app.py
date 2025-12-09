@@ -54,8 +54,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- TU CLAVE API ---
-api_key = 'AIzaSyBlS31KHG75KBRUiuk5MJjz99uE8heuvko'  # <--- PEGA TU CLAVE REAL AQUÍ
+import os
+# Intenta obtenerla de los secretos de Streamlit, si no, del entorno
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+else:
+    api_key = os.getenv("GEMINI_API_KEY")
 
 # --- LÓGICA DE PROCESAMIENTO ---
 def procesar_fila(producto, tono, model):
