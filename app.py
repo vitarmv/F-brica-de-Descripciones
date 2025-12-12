@@ -30,6 +30,8 @@ st.markdown("""
         border: 2px dashed #D6E2E9; border-radius: 15px;
         padding: 20px; background-color: #FFFFFF;
     }
+    /* Estilo para la caja de info en sidebar */
+    .stAlert { border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -115,14 +117,48 @@ def descargar_excel(df, nombre_archivo):
 def main():
     st.title("✨ Fábrica de Contenido AI & Tools")
     
+    # --- SIDEBAR (PANEL LATERAL) ---
     st.sidebar.header("🛠️ Panel de Control")
     modo = st.sidebar.radio(
         "Selecciona una herramienta:",
         ("📝 Generador de Texto", "👁️ Generador por Visión", "🔍 Auditor de Imágenes", "🧹 Limpiador CSV"),
         key="navegacion_principal"
     )
-    
-    # Configurar API Key si es necesaria (Módulos de IA)
+
+    st.sidebar.markdown("---") # Separador visual
+
+    # --- AYUDA CONTEXTUAL (RESTAURADA) ---
+    if modo == "📝 Generador de Texto":
+        st.sidebar.info(
+            "**¿Qué hace?**\n"
+            "Crea descripciones desde cero basándose solo en el nombre del producto.\n\n"
+            "**Tu Excel necesita:**\n"
+            "• Una columna con nombres (ej: 'Camiseta Nike')."
+        )
+    elif modo == "👁️ Generador por Visión":
+        st.sidebar.info(
+            "**¿Qué hace?**\n"
+            "La IA 'mira' la foto desde la URL y escribe la descripción. ¡Ideal si no tienes datos!\n\n"
+            "**Tu Excel necesita:**\n"
+            "• Una columna con URLs de imágenes."
+        )
+    elif modo == "🔍 Auditor de Imágenes":
+        st.sidebar.info(
+            "**¿Qué hace?**\n"
+            "Verifica que los enlaces no den error 404 antes de subir a Shopify.\n\n"
+            "**Tu Excel necesita:**\n"
+            "• Una columna con URLs de imágenes."
+        )
+    elif modo == "🧹 Limpiador CSV":
+        st.sidebar.info(
+            "**¿Qué hace?**\n"
+            "Prepara el archivo técnico:\n"
+            "1. Crea 'Handles' (URLs amigables).\n"
+            "2. Limpia basura HTML.\n"
+            "3. Pone Mayúsculas correctas."
+        )
+
+    # Configurar API Key si es necesaria
     usando_ia = modo in ["📝 Generador de Texto", "👁️ Generador por Visión"]
     if usando_ia:
         if not api_key:
@@ -130,6 +166,7 @@ def main():
             return
         genai.configure(api_key=api_key)
 
+    # --- ÁREA PRINCIPAL ---
     uploaded_file = st.file_uploader("Sube tu archivo (Excel/CSV)", type=['csv', 'xlsx'])
 
     if uploaded_file is not None:
@@ -155,10 +192,12 @@ def main():
                     df['Desc_IA'] = res
                     descargar_excel(df, "descripciones_texto.xlsx")
 
-            # --- MÓDULO 4: VISIÓN (NUEVO) ---
+            # --- MÓDULO 4: VISIÓN ---
             elif modo == "👁️ Generador por Visión":
                 st.subheader("Generación 'Mirando' la Foto")
-                st.info("La IA descargará cada imagen y escribirá sobre lo que ve.")
+                # st.info("La IA descargará cada imagen y escribirá sobre lo que ve.") 
+                # (Comenté esto porque ya está en el sidebar)
+                
                 col_url = st.selectbox("Columna URLs Imagen:", df.columns)
                 tono = st.selectbox("Tono:", ["Moda/Estilo", "Descriptivo", "Minimalista"])
                 
@@ -167,21 +206,15 @@ def main():
                     estado = st.empty()
                     res = []
                     model = genai.GenerativeModel('gemini-1.5-flash')
-                    
-                    # Contenedor para mostrar la imagen que se está procesando (Efecto WOW)
                     preview_img = st.empty()
 
                     for i, row in df.iterrows():
                         url = row[col_url]
                         estado.text(f"Analizando imagen {i+1}/{len(df)}...")
-                        
-                        # 1. Descargar imagen temporalmente
                         img = descargar_imagen_pil(url)
                         
                         if img:
-                            # Mostrar preview pequeña
                             preview_img.image(img, caption=f"Procesando producto {i+1}", width=150)
-                            # 2. Enviar a Gemini
                             desc = procesar_vision(img, tono, model)
                         else:
                             desc = "Error: Imagen inaccesible"
@@ -191,7 +224,7 @@ def main():
                     
                     df['Desc_Vision_IA'] = res
                     estado.text("✅ ¡Análisis visual completado!")
-                    preview_img.empty() # Limpiar preview
+                    preview_img.empty()
                     descargar_excel(df, "descripciones_visuales.xlsx")
 
             # --- MÓDULO 2: AUDITOR ---
