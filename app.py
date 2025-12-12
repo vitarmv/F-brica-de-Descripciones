@@ -7,6 +7,7 @@ import requests
 import re
 import unicodedata
 import os
+from PIL import Image
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Bulk AI Processor", page_icon="✨", layout="wide")
@@ -38,186 +39,188 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = os.getenv("GEMINI_API_KEY")
 
-# --- FUNCIONES DE UTILIDAD (MÓDULO 3) ---
+# --- FUNCIONES DE UTILIDAD ---
 def limpiar_texto(texto):
     """Elimina HTML, espacios extra y caracteres raros."""
-    if not isinstance(texto, str):
-        return ""
-    # Eliminar etiquetas HTML
+    if not isinstance(texto, str): return ""
     clean = re.sub('<.*?>', '', texto)
-    # Eliminar espacios múltiples
     clean = re.sub('\s+', ' ', clean).strip()
     return clean
 
 def generar_handle(texto):
-    """Crea un slug URL-friendly para Shopify (ej: 'Camisa Roja' -> 'camisa-roja')"""
-    if not isinstance(texto, str):
-        return ""
-    # Normalizar (quitar tildes, ñ, etc)
+    """Crea un slug URL-friendly."""
+    if not isinstance(texto, str): return ""
     try:
         texto = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('utf-8')
-    except:
-        pass # Si falla la normalización, usamos el texto tal cual
+    except: pass
     texto = texto.lower()
-    # Reemplazar todo lo que no sea letra/numero con guión
     texto = re.sub(r'[^a-z0-9]+', '-', texto)
     return texto.strip('-')
 
-# --- FUNCIONES MÓDULOS ANTERIORES ---
+def descargar_imagen_pil(url):
+    """Descarga una imagen desde una URL y la convierte a objeto PIL."""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, stream=True, timeout=5)
+        if response.status_code == 200:
+            return Image.open(io.BytesIO(response.content))
+    except Exception:
+        return None
+    return None
+
+# --- FUNCIONES DE IA (TEXTO Y VISIÓN) ---
 def procesar_texto(producto, tono, model):
     max_intentos = 3
     for intento in range(max_intentos):
         try:
-            prompt = f"""
-            Actúa como experto en E-commerce.
-            TAREA: Escribe una descripción de producto corta (máx 50 palabras) para: {producto}.
-            TONO: {tono}.
-            REGLAS: Solo texto, sin repetir título, sin markdown, directo al beneficio.
-            """
+            prompt = f"Actúa como experto E-commerce. Escribe descripción corta (máx 40 palabras) para: {producto}. Tono: {tono}. Sin markdown."
             response = model.generate_content(prompt)
-            texto = response.text.replace('**', '').replace('##', '').strip()
-            if texto.lower().startswith(producto.lower()):
-                texto = texto[len(producto):].strip(" -:.")
-            return texto
+            return response.text.strip()
         except Exception as e:
-            time.sleep((intento + 1) * 2)
+            time.sleep(2)
             if intento == max_intentos - 1: return f"Error: {e}"
-    return "Error desconocido"
+    return "Error"
+
+def procesar_vision(imagen_pil, tono, model):
+    """Genera descripción viendo la imagen"""
+    if imagen_pil is None:
+        return "Error: No se pudo descargar imagen"
+    
+    max_intentos = 3
+    for intento in range(max_intentos):
+        try:
+            prompt = f"Eres un experto en ventas. Mira este producto y escribe una descripción atractiva para venta online (máx 40 palabras). Tono: {tono}. Describe material y estilo visual."
+            response = model.generate_content([prompt, imagen_pil])
+            return response.text.strip()
+        except Exception as e:
+            time.sleep(2)
+            if intento == max_intentos - 1: return f"Error IA: {e}"
+    return "Error"
 
 def validar_url_imagen(url):
     try:
         if pd.isna(url) or url == "": return "❌ URL Vacía"
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.head(url, headers=headers, timeout=3, allow_redirects=True)
-        if r.status_code == 200: return "✅ Activo"
-        elif r.status_code == 404: return "🚫 No Encontrado (404)"
-        else: return f"⚠️ Error {r.status_code}"
+        return "✅ Activo" if r.status_code == 200 else f"⚠️ Error {r.status_code}"
     except Exception: return "❓ Error Conexión"
 
 def descargar_excel(df, nombre_archivo):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False)
-    st.download_button(
-        label="📥 Descargar Resultados",
-        data=output.getvalue(),
-        file_name=nombre_archivo,
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+    st.download_button(label="📥 Descargar Resultados", data=output.getvalue(), file_name=nombre_archivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 # --- INTERFAZ PRINCIPAL ---
 def main():
     st.title("✨ Fábrica de Contenido AI & Tools")
     
     st.sidebar.header("🛠️ Panel de Control")
-    # AQUÍ ESTABA EL ERROR: Agregamos key='navegacion_principal' para hacerlo único
     modo = st.sidebar.radio(
         "Selecciona una herramienta:",
-        ("📝 Generador de Texto", "🔍 Auditor de Imágenes", "🧹 Limpiador CSV"),
+        ("📝 Generador de Texto", "👁️ Generador por Visión", "🔍 Auditor de Imágenes", "🧹 Limpiador CSV"),
         key="navegacion_principal"
     )
     
-    # Mensajes de ayuda contextual
-    if modo == "📝 Generador de Texto":
-        st.sidebar.info("Crea descripciones desde cero usando IA.")
-    elif modo == "🔍 Auditor de Imágenes":
-        st.sidebar.info("Verifica que los enlaces de imágenes no estén rotos.")
-    elif modo == "🧹 Limpiador CSV":
-        st.sidebar.info("Prepara tu archivo para Shopify: Genera Handles y limpia HTML sucio.")
-
-    # Configuración de API
-    if modo == "📝 Generador de Texto":
+    # Configurar API Key si es necesaria (Módulos de IA)
+    usando_ia = modo in ["📝 Generador de Texto", "👁️ Generador por Visión"]
+    if usando_ia:
         if not api_key:
-            st.error("🔒 Por favor configura tu API Key en los secretos o el entorno.")
+            st.error("🔒 Configura tu API Key.")
             return
         genai.configure(api_key=api_key)
 
-    uploaded_file = st.file_uploader("Arrastra tu archivo Excel o CSV aquí", type=['csv', 'xlsx'])
+    uploaded_file = st.file_uploader("Sube tu archivo (Excel/CSV)", type=['csv', 'xlsx'])
 
     if uploaded_file is not None:
         try:
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file)
-            else:
-                df = pd.read_excel(uploaded_file)
+            if uploaded_file.name.endswith('.csv'): df = pd.read_csv(uploaded_file)
+            else: df = pd.read_excel(uploaded_file)
             
-            st.success(f"Archivo cargado: {len(df)} filas.")
+            st.success(f"Cargado: {len(df)} filas.")
             st.dataframe(df.head(3), use_container_width=True)
 
-            # --- MÓDULO 1: GENERADOR DE TEXTO ---
+            # --- MÓDULO 1: TEXTO ---
             if modo == "📝 Generador de Texto":
-                st.subheader("Configuración de Redacción")
-                col1, col2 = st.columns(2)
-                with col1:
-                    columna_producto = st.selectbox("Columna de Nombres:", df.columns)
-                with col2:
-                    tono = st.selectbox("Tono:", ["Persuasivo", "Lujo", "Divertido", "Técnico"])
-
-                if st.button("🚀 Generar Descripciones"):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    resultados = []
+                st.subheader("Generación Basada en Nombre")
+                col_prod = st.selectbox("Columna Nombres:", df.columns)
+                tono = st.selectbox("Tono:", ["Persuasivo", "Lujo", "Técnico"])
+                if st.button("🚀 Iniciar"):
+                    progreso = st.progress(0)
+                    res = []
                     model = genai.GenerativeModel('gemini-1.5-flash')
+                    for i, row in df.iterrows():
+                        res.append(procesar_texto(row[col_prod], tono, model))
+                        progreso.progress((i+1)/len(df))
+                    df['Desc_IA'] = res
+                    descargar_excel(df, "descripciones_texto.xlsx")
 
-                    for index, row in df.iterrows():
-                        status_text.text(f"Escribiendo {index + 1}/{len(df)}...")
-                        desc = procesar_texto(row[columna_producto], tono, model)
-                        resultados.append(desc)
-                        progress_bar.progress((index + 1) / len(df))
-                        time.sleep(1)
-
-                    df['Descripción_IA'] = resultados
-                    status_text.text("✅ ¡Listo!")
-                    progress_bar.progress(100)
-                    descargar_excel(df, "descripciones_generadas.xlsx")
-
-            # --- MÓDULO 2: AUDITOR DE IMÁGENES ---
-            elif modo == "🔍 Auditor de Imágenes":
-                st.subheader("Auditoría Técnica de Enlaces")
-                columna_url = st.selectbox("Columna de URLs de imágenes:", df.columns)
-
-                if st.button("🔎 Auditar Enlaces"):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    estados = []
-
-                    for index, row in df.iterrows():
-                        status_text.text(f"Verificando {index + 1}/{len(df)}...")
-                        estado = validar_url_imagen(row[columna_url])
-                        estados.append(estado)
-                        progress_bar.progress((index + 1) / len(df))
-                    
-                    df['Estado_Imagen'] = estados
-                    status_text.text("✅ Auditoría completada.")
-                    progress_bar.progress(100)
-                    descargar_excel(df, "reporte_imagenes.xlsx")
-
-            # --- MÓDULO 3: LIMPIADOR CSV ---
-            elif modo == "🧹 Limpiador CSV":
-                st.subheader("Limpieza y Estructuración para Shopify")
-                st.markdown("Genera 'Handles' (URLs amigables) y limpia basura HTML de textos copiados.")
+            # --- MÓDULO 4: VISIÓN (NUEVO) ---
+            elif modo == "👁️ Generador por Visión":
+                st.subheader("Generación 'Mirando' la Foto")
+                st.info("La IA descargará cada imagen y escribirá sobre lo que ve.")
+                col_url = st.selectbox("Columna URLs Imagen:", df.columns)
+                tono = st.selectbox("Tono:", ["Moda/Estilo", "Descriptivo", "Minimalista"])
                 
-                col_titulo = st.selectbox("Columna de Títulos (para generar Handle):", df.columns)
-                col_desc = st.selectbox("Columna de Descripción (para limpiar HTML):", ["Ninguna"] + list(df.columns))
-
-                if st.button("✨ Limpiar y Estructurar"):
-                    # 1. Generar Handles
-                    st.write("⚙️ Generando Handles únicos...")
-                    df['Handle'] = df[col_titulo].apply(generar_handle)
+                if st.button("👁️ Analizar y Describir"):
+                    progreso = st.progress(0)
+                    estado = st.empty()
+                    res = []
+                    model = genai.GenerativeModel('gemini-1.5-flash')
                     
-                    # 2. Limpiar HTML si se seleccionó columna
-                    if col_desc != "Ninguna":
-                        st.write("🧼 Limpiando HTML y espacios...")
-                        df[col_desc] = df[col_desc].apply(limpiar_texto)
-                        # También normalizamos el título a "Title Case"
-                        df[col_titulo] = df[col_titulo].astype(str).str.title()
+                    # Contenedor para mostrar la imagen que se está procesando (Efecto WOW)
+                    preview_img = st.empty()
 
-                    st.success("✅ Archivo optimizado.")
-                    st.dataframe(df.head())
-                    descargar_excel(df, "shopify_listo_para_importar.xlsx")
+                    for i, row in df.iterrows():
+                        url = row[col_url]
+                        estado.text(f"Analizando imagen {i+1}/{len(df)}...")
+                        
+                        # 1. Descargar imagen temporalmente
+                        img = descargar_imagen_pil(url)
+                        
+                        if img:
+                            # Mostrar preview pequeña
+                            preview_img.image(img, caption=f"Procesando producto {i+1}", width=150)
+                            # 2. Enviar a Gemini
+                            desc = procesar_vision(img, tono, model)
+                        else:
+                            desc = "Error: Imagen inaccesible"
+                        
+                        res.append(desc)
+                        progreso.progress((i+1)/len(df))
+                    
+                    df['Desc_Vision_IA'] = res
+                    estado.text("✅ ¡Análisis visual completado!")
+                    preview_img.empty() # Limpiar preview
+                    descargar_excel(df, "descripciones_visuales.xlsx")
+
+            # --- MÓDULO 2: AUDITOR ---
+            elif modo == "🔍 Auditor de Imágenes":
+                st.subheader("Auditoría de Enlaces")
+                col_url = st.selectbox("Columna URLs:", df.columns)
+                if st.button("🔎 Auditar"):
+                    progreso = st.progress(0)
+                    res = []
+                    for i, row in df.iterrows():
+                        res.append(validar_url_imagen(row[col_url]))
+                        progreso.progress((i+1)/len(df))
+                    df['Estado_Img'] = res
+                    descargar_excel(df, "reporte_auditoria.xlsx")
+
+            # --- MÓDULO 3: LIMPIADOR ---
+            elif modo == "🧹 Limpiador CSV":
+                st.subheader("Limpieza Shopify")
+                col_tit = st.selectbox("Columna Títulos:", df.columns)
+                col_desc = st.selectbox("Columna Descripción (Opcional):", ["Ninguna"] + list(df.columns))
+                if st.button("✨ Limpiar"):
+                    df['Handle'] = df[col_tit].apply(generar_handle)
+                    if col_desc != "Ninguna":
+                        df[col_desc] = df[col_desc].apply(limpiar_texto)
+                        df[col_tit] = df[col_tit].astype(str).str.title()
+                    descargar_excel(df, "csv_limpio.xlsx")
 
         except Exception as e:
-            st.error(f"Error procesando el archivo: {e}")
+            st.error(f"Error: {e}")
 
 if __name__ == "__main__":
     main()
