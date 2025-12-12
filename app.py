@@ -6,6 +6,7 @@ import io
 import requests
 import re
 import unicodedata
+import os
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Bulk AI Processor", page_icon="✨", layout="wide")
@@ -31,7 +32,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-import os
 # API Key
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -54,7 +54,10 @@ def generar_handle(texto):
     if not isinstance(texto, str):
         return ""
     # Normalizar (quitar tildes, ñ, etc)
-    texto = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('utf-8')
+    try:
+        texto = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('utf-8')
+    except:
+        pass # Si falla la normalización, usamos el texto tal cual
     texto = texto.lower()
     # Reemplazar todo lo que no sea letra/numero con guión
     texto = re.sub(r'[^a-z0-9]+', '-', texto)
@@ -107,12 +110,14 @@ def main():
     st.title("✨ Fábrica de Contenido AI & Tools")
     
     st.sidebar.header("🛠️ Panel de Control")
+    # AQUÍ ESTABA EL ERROR: Agregamos key='navegacion_principal' para hacerlo único
     modo = st.sidebar.radio(
         "Selecciona una herramienta:",
-        ("📝 Generador de Texto", "🔍 Auditor de Imágenes", "🧹 Limpiador CSV")
+        ("📝 Generador de Texto", "🔍 Auditor de Imágenes", "🧹 Limpiador CSV"),
+        key="navegacion_principal"
     )
     
-    # Mensajes de ayuda contextual según el modo
+    # Mensajes de ayuda contextual
     if modo == "📝 Generador de Texto":
         st.sidebar.info("Crea descripciones desde cero usando IA.")
     elif modo == "🔍 Auditor de Imágenes":
@@ -120,10 +125,10 @@ def main():
     elif modo == "🧹 Limpiador CSV":
         st.sidebar.info("Prepara tu archivo para Shopify: Genera Handles y limpia HTML sucio.")
 
-    # Configuración de API solo necesaria para el generador de texto
+    # Configuración de API
     if modo == "📝 Generador de Texto":
         if not api_key:
-            st.error("🔒 Por favor configura tu API Key.")
+            st.error("🔒 Por favor configura tu API Key en los secretos o el entorno.")
             return
         genai.configure(api_key=api_key)
 
@@ -187,7 +192,7 @@ def main():
                     progress_bar.progress(100)
                     descargar_excel(df, "reporte_imagenes.xlsx")
 
-            # --- MÓDULO 3: LIMPIADOR CSV (NUEVO) ---
+            # --- MÓDULO 3: LIMPIADOR CSV ---
             elif modo == "🧹 Limpiador CSV":
                 st.subheader("Limpieza y Estructuración para Shopify")
                 st.markdown("Genera 'Handles' (URLs amigables) y limpia basura HTML de textos copiados.")
@@ -208,14 +213,11 @@ def main():
                         df[col_titulo] = df[col_titulo].astype(str).str.title()
 
                     st.success("✅ Archivo optimizado.")
-                    st.dataframe(df[[col_titulo, 'Handle']].head()) # Mostrar preview de cambios
+                    st.dataframe(df.head())
                     descargar_excel(df, "shopify_listo_para_importar.xlsx")
 
         except Exception as e:
             st.error(f"Error procesando el archivo: {e}")
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()
