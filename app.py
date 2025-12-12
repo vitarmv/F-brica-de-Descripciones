@@ -30,7 +30,6 @@ st.markdown("""
         border: 2px dashed #D6E2E9; border-radius: 15px;
         padding: 20px; background-color: #FFFFFF;
     }
-    /* Estilo para la caja de info en sidebar */
     .stAlert { border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
@@ -43,14 +42,12 @@ else:
 
 # --- FUNCIONES DE UTILIDAD ---
 def limpiar_texto(texto):
-    """Elimina HTML, espacios extra y caracteres raros."""
     if not isinstance(texto, str): return ""
     clean = re.sub('<.*?>', '', texto)
     clean = re.sub('\s+', ' ', clean).strip()
     return clean
 
 def generar_handle(texto):
-    """Crea un slug URL-friendly."""
     if not isinstance(texto, str): return ""
     try:
         texto = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('utf-8')
@@ -60,7 +57,6 @@ def generar_handle(texto):
     return texto.strip('-')
 
 def descargar_imagen_pil(url):
-    """Descarga una imagen desde una URL y la convierte a objeto PIL."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, stream=True, timeout=5)
@@ -84,7 +80,6 @@ def procesar_texto(producto, tono, model):
     return "Error"
 
 def procesar_vision(imagen_pil, tono, model):
-    """Genera descripción viendo la imagen"""
     if imagen_pil is None:
         return "Error: No se pudo descargar imagen"
     
@@ -117,7 +112,6 @@ def descargar_excel(df, nombre_archivo):
 def main():
     st.title("✨ Fábrica de Contenido AI & Tools")
     
-    # --- SIDEBAR (PANEL LATERAL) ---
     st.sidebar.header("🛠️ Panel de Control")
     modo = st.sidebar.radio(
         "Selecciona una herramienta:",
@@ -125,40 +119,19 @@ def main():
         key="navegacion_principal"
     )
 
-    st.sidebar.markdown("---") # Separador visual
+    st.sidebar.markdown("---")
 
-    # --- AYUDA CONTEXTUAL (RESTAURADA) ---
+    # --- AYUDA CONTEXTUAL ---
     if modo == "📝 Generador de Texto":
-        st.sidebar.info(
-            "**¿Qué hace?**\n"
-            "Crea descripciones desde cero basándose solo en el nombre del producto.\n\n"
-            "**Tu Excel necesita:**\n"
-            "• Una columna con nombres (ej: 'Camiseta Nike')."
-        )
+        st.sidebar.info("Crea descripciones desde cero usando el nombre del producto.")
     elif modo == "👁️ Generador por Visión":
-        st.sidebar.info(
-            "**¿Qué hace?**\n"
-            "La IA 'mira' la foto desde la URL y escribe la descripción. ¡Ideal si no tienes datos!\n\n"
-            "**Tu Excel necesita:**\n"
-            "• Una columna con URLs de imágenes."
-        )
+        st.sidebar.info("La IA 'mira' la foto desde la URL y escribe la descripción.")
     elif modo == "🔍 Auditor de Imágenes":
-        st.sidebar.info(
-            "**¿Qué hace?**\n"
-            "Verifica que los enlaces no den error 404 antes de subir a Shopify.\n\n"
-            "**Tu Excel necesita:**\n"
-            "• Una columna con URLs de imágenes."
-        )
+        st.sidebar.info("Verifica que los enlaces no den error 404.")
     elif modo == "🧹 Limpiador CSV":
-        st.sidebar.info(
-            "**¿Qué hace?**\n"
-            "Prepara el archivo técnico:\n"
-            "1. Crea 'Handles' (URLs amigables).\n"
-            "2. Limpia basura HTML.\n"
-            "3. Pone Mayúsculas correctas."
-        )
+        st.sidebar.info("Genera Handles y limpia HTML sucio.")
 
-    # Configurar API Key si es necesaria
+    # Configurar API Key
     usando_ia = modo in ["📝 Generador de Texto", "👁️ Generador por Visión"]
     if usando_ia:
         if not api_key:
@@ -166,7 +139,6 @@ def main():
             return
         genai.configure(api_key=api_key)
 
-    # --- ÁREA PRINCIPAL ---
     uploaded_file = st.file_uploader("Sube tu archivo (Excel/CSV)", type=['csv', 'xlsx'])
 
     if uploaded_file is not None:
@@ -185,7 +157,15 @@ def main():
                 if st.button("🚀 Iniciar"):
                     progreso = st.progress(0)
                     res = []
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    # --- ACTUALIZACIÓN A GEMINI 2.5 FLASH ---
+                    # Si 'gemini-2.5-flash' da error, intenta 'gemini-1.5-flash-latest' como fallback
+                    try:
+                        model = genai.GenerativeModel('gemini-2.5-flash')
+                    except:
+                        st.warning("Modelo 2.5 no detectado, usando 1.5-flash...")
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+
                     for i, row in df.iterrows():
                         res.append(procesar_texto(row[col_prod], tono, model))
                         progreso.progress((i+1)/len(df))
@@ -195,9 +175,6 @@ def main():
             # --- MÓDULO 4: VISIÓN ---
             elif modo == "👁️ Generador por Visión":
                 st.subheader("Generación 'Mirando' la Foto")
-                # st.info("La IA descargará cada imagen y escribirá sobre lo que ve.") 
-                # (Comenté esto porque ya está en el sidebar)
-                
                 col_url = st.selectbox("Columna URLs Imagen:", df.columns)
                 tono = st.selectbox("Tono:", ["Moda/Estilo", "Descriptivo", "Minimalista"])
                 
@@ -205,8 +182,14 @@ def main():
                     progreso = st.progress(0)
                     estado = st.empty()
                     res = []
-                    model = genai.GenerativeModel('gemini-1.5-flash')
                     preview_img = st.empty()
+                    
+                    # --- ACTUALIZACIÓN A GEMINI 2.5 FLASH ---
+                    try:
+                        model = genai.GenerativeModel('gemini-2.5-flash')
+                    except:
+                        st.warning("Modelo 2.5 no detectado, usando 1.5-flash...")
+                        model = genai.GenerativeModel('gemini-1.5-flash')
 
                     for i, row in df.iterrows():
                         url = row[col_url]
