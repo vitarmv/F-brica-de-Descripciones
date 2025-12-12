@@ -3,24 +3,19 @@ import google.generativeai as genai
 import pandas as pd
 import time
 import io
-import requests  # NUEVA LIBRERÍA PARA VALIDAR IMÁGENES
+import requests
+import re
+import unicodedata
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Bulk AI Processor", page_icon="✨", layout="wide") # Cambié a 'wide' para ver mejor las tablas
+st.set_page_config(page_title="Bulk AI Processor", page_icon="✨", layout="wide")
 
-# --- DISEÑO MINIMALISTA & PASTEL (CSS) ---
+# --- ESTILOS CSS ---
 st.markdown("""
 <style>
-    /* Fondo general suave */
     .stApp { background-color: #FDFBF7; }
-    
-    /* Títulos */
     h1, h2, h3 { color: #4A4E69; font-family: 'Helvetica', sans-serif; }
-    
-    /* Sidebar */
     [data-testid="stSidebar"] { background-color: #F2E9E4; }
-    
-    /* Botones */
     div.stButton > button:first-child {
         background-color: #B8E0D2; color: #4A4E69; border: none;
         border-radius: 12px; padding: 15px 30px; font-weight: bold;
@@ -29,8 +24,6 @@ st.markdown("""
     div.stButton > button:first-child:hover {
         background-color: #95B8D1; transform: translateY(-2px);
     }
-
-    /* Área de carga */
     .stFileUploader {
         border: 2px dashed #D6E2E9; border-radius: 15px;
         padding: 20px; background-color: #FFFFFF;
@@ -45,7 +38,29 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = os.getenv("GEMINI_API_KEY")
 
-# --- FUNCIÓN 1: GENERACIÓN DE TEXTO (GEMINI) ---
+# --- FUNCIONES DE UTILIDAD (MÓDULO 3) ---
+def limpiar_texto(texto):
+    """Elimina HTML, espacios extra y caracteres raros."""
+    if not isinstance(texto, str):
+        return ""
+    # Eliminar etiquetas HTML
+    clean = re.sub('<.*?>', '', texto)
+    # Eliminar espacios múltiples
+    clean = re.sub('\s+', ' ', clean).strip()
+    return clean
+
+def generar_handle(texto):
+    """Crea un slug URL-friendly para Shopify (ej: 'Camisa Roja' -> 'camisa-roja')"""
+    if not isinstance(texto, str):
+        return ""
+    # Normalizar (quitar tildes, ñ, etc)
+    texto = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('utf-8')
+    texto = texto.lower()
+    # Reemplazar todo lo que no sea letra/numero con guión
+    texto = re.sub(r'[^a-z0-9]+', '-', texto)
+    return texto.strip('-')
+
+# --- FUNCIONES MÓDULOS ANTERIORES ---
 def procesar_texto(producto, tono, model):
     max_intentos = 3
     for intento in range(max_intentos):
@@ -66,58 +81,52 @@ def procesar_texto(producto, tono, model):
             if intento == max_intentos - 1: return f"Error: {e}"
     return "Error desconocido"
 
-# --- FUNCIÓN 2: VALIDACIÓN DE IMÁGENES (NUEVA) ---
 def validar_url_imagen(url):
-    """
-    Realiza una petición HEAD (más ligera que descargar la imagen)
-    para ver si el enlace funciona.
-    """
     try:
-        if pd.isna(url) or url == "":
-            return "❌ URL Vacía"
-        
-        # Simula ser un navegador real para evitar bloqueos
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        
-        # Timeout de 3 segundos para que no se cuelgue
+        if pd.isna(url) or url == "": return "❌ URL Vacía"
+        headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.head(url, headers=headers, timeout=3, allow_redirects=True)
-        
-        if r.status_code == 200:
-            return "✅ Activo"
-        elif r.status_code == 404:
-            return "🚫 No Encontrado (404)"
-        elif r.status_code == 403:
-            return "🔒 Acceso Prohibido (403)"
-        else:
-            return f"⚠️ Error {r.status_code}"
-            
-    except requests.exceptions.Timeout:
-        return "🐢 Timeout (Lento)"
-    except requests.exceptions.ConnectionError:
-        return "🔌 Error Conexión"
-    except Exception as e:
-        return "❓ Error Formato"
+        if r.status_code == 200: return "✅ Activo"
+        elif r.status_code == 404: return "🚫 No Encontrado (404)"
+        else: return f"⚠️ Error {r.status_code}"
+    except Exception: return "❓ Error Conexión"
+
+def descargar_excel(df, nombre_archivo):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False)
+    st.download_button(
+        label="📥 Descargar Resultados",
+        data=output.getvalue(),
+        file_name=nombre_archivo,
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 # --- INTERFAZ PRINCIPAL ---
 def main():
     st.title("✨ Fábrica de Contenido AI & Tools")
     
-    # --- SIDEBAR: SELECCIÓN DE MÓDULO ---
     st.sidebar.header("🛠️ Panel de Control")
     modo = st.sidebar.radio(
         "Selecciona una herramienta:",
-        ("📝 Generador de Texto", "🔍 Auditor de Imágenes")
+        ("📝 Generador de Texto", "🔍 Auditor de Imágenes", "🧹 Limpiador CSV")
     )
     
-    st.sidebar.info("💡 Usa el 'Auditor' para validar enlaces rotos antes de cargar a Shopify.")
+    # Mensajes de ayuda contextual según el modo
+    if modo == "📝 Generador de Texto":
+        st.sidebar.info("Crea descripciones desde cero usando IA.")
+    elif modo == "🔍 Auditor de Imágenes":
+        st.sidebar.info("Verifica que los enlaces de imágenes no estén rotos.")
+    elif modo == "🧹 Limpiador CSV":
+        st.sidebar.info("Prepara tu archivo para Shopify: Genera Handles y limpia HTML sucio.")
 
-    if not api_key:
-        st.error("🔒 Por favor configura tu API Key.")
-        return
+    # Configuración de API solo necesaria para el generador de texto
+    if modo == "📝 Generador de Texto":
+        if not api_key:
+            st.error("🔒 Por favor configura tu API Key.")
+            return
+        genai.configure(api_key=api_key)
 
-    genai.configure(api_key=api_key)
-
-    # SUBIDA DE ARCHIVO (Común para ambos módulos)
     uploaded_file = st.file_uploader("Arrastra tu archivo Excel o CSV aquí", type=['csv', 'xlsx'])
 
     if uploaded_file is not None:
@@ -130,7 +139,7 @@ def main():
             st.success(f"Archivo cargado: {len(df)} filas.")
             st.dataframe(df.head(3), use_container_width=True)
 
-            # --- LÓGICA MÓDULO 1: GENERADOR DE TEXTO ---
+            # --- MÓDULO 1: GENERADOR DE TEXTO ---
             if modo == "📝 Generador de Texto":
                 st.subheader("Configuración de Redacción")
                 col1, col2 = st.columns(2)
@@ -143,68 +152,70 @@ def main():
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     resultados = []
-                    model = genai.GenerativeModel('gemini-1.5-flash') # Usando modelo estándar flash
+                    model = genai.GenerativeModel('gemini-1.5-flash')
 
                     for index, row in df.iterrows():
                         status_text.text(f"Escribiendo {index + 1}/{len(df)}...")
                         desc = procesar_texto(row[columna_producto], tono, model)
                         resultados.append(desc)
                         progress_bar.progress((index + 1) / len(df))
-                        time.sleep(1) # Rate limit preventivo
+                        time.sleep(1)
 
                     df['Descripción_IA'] = resultados
                     status_text.text("✅ ¡Listo!")
                     progress_bar.progress(100)
                     descargar_excel(df, "descripciones_generadas.xlsx")
 
-            # --- LÓGICA MÓDULO 2: AUDITOR DE IMÁGENES ---
+            # --- MÓDULO 2: AUDITOR DE IMÁGENES ---
             elif modo == "🔍 Auditor de Imágenes":
                 st.subheader("Auditoría Técnica de Enlaces")
-                st.markdown("""
-                Este módulo verificará que los enlaces de tus imágenes funcionen.
-                **Ideal para el paquete 'Premium' en Fiverr.**
-                """)
-                
-                columna_url = st.selectbox("¿En qué columna están las URLs de las imágenes?", df.columns)
+                columna_url = st.selectbox("Columna de URLs de imágenes:", df.columns)
 
-                if st.button("magnifying_glass_tilted_left: Auditar Enlaces"):
+                if st.button("🔎 Auditar Enlaces"):
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     estados = []
 
                     for index, row in df.iterrows():
-                        status_text.text(f"Verificando enlace {index + 1}/{len(df)}...")
+                        status_text.text(f"Verificando {index + 1}/{len(df)}...")
                         estado = validar_url_imagen(row[columna_url])
                         estados.append(estado)
                         progress_bar.progress((index + 1) / len(df))
-                        # No necesitamos sleep aquí, requests es rápido, pero cuidado con bloquear la IP si son miles
                     
                     df['Estado_Imagen'] = estados
-                    
-                    # Conteo de errores
-                    errores = df[df['Estado_Imagen'] != "✅ Activo"].shape[0]
-                    if errores > 0:
-                        st.warning(f"⚠️ Se encontraron {errores} enlaces rotos o con problemas.")
-                    else:
-                        st.success("🎉 ¡Todos los enlaces funcionan perfectamente!")
-
                     status_text.text("✅ Auditoría completada.")
                     progress_bar.progress(100)
                     descargar_excel(df, "reporte_imagenes.xlsx")
 
+            # --- MÓDULO 3: LIMPIADOR CSV (NUEVO) ---
+            elif modo == "🧹 Limpiador CSV":
+                st.subheader("Limpieza y Estructuración para Shopify")
+                st.markdown("Genera 'Handles' (URLs amigables) y limpia basura HTML de textos copiados.")
+                
+                col_titulo = st.selectbox("Columna de Títulos (para generar Handle):", df.columns)
+                col_desc = st.selectbox("Columna de Descripción (para limpiar HTML):", ["Ninguna"] + list(df.columns))
+
+                if st.button("✨ Limpiar y Estructurar"):
+                    # 1. Generar Handles
+                    st.write("⚙️ Generando Handles únicos...")
+                    df['Handle'] = df[col_titulo].apply(generar_handle)
+                    
+                    # 2. Limpiar HTML si se seleccionó columna
+                    if col_desc != "Ninguna":
+                        st.write("🧼 Limpiando HTML y espacios...")
+                        df[col_desc] = df[col_desc].apply(limpiar_texto)
+                        # También normalizamos el título a "Title Case"
+                        df[col_titulo] = df[col_titulo].astype(str).str.title()
+
+                    st.success("✅ Archivo optimizado.")
+                    st.dataframe(df[[col_titulo, 'Handle']].head()) # Mostrar preview de cambios
+                    descargar_excel(df, "shopify_listo_para_importar.xlsx")
+
         except Exception as e:
             st.error(f"Error procesando el archivo: {e}")
 
-def descargar_excel(df, nombre_archivo):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
-    st.download_button(
-        label="📥 Descargar Resultados",
-        data=output.getvalue(),
-        file_name=nombre_archivo,
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
