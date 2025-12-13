@@ -66,14 +66,25 @@ def descargar_imagen_pil(url):
         return None
     return None
 
-# --- FUNCIONES DE IA (TEXTO Y VISIÓN) ---
+# --- FUNCIONES DE IA (CON PROMPTS ESTRICTOS "ANTI-CHAT") ---
 def procesar_texto(producto, tono, model):
     max_intentos = 3
     for intento in range(max_intentos):
         try:
-            prompt = f"Actúa como experto E-commerce. Escribe descripción corta (máx 40 palabras) para: {producto}. Tono: {tono}. Sin markdown."
+            # Prompt Estricto para Texto
+            prompt = f"""
+            Eres un motor de redacción para E-commerce.
+            INPUT: {producto}
+            TONO: {tono}
+            TAREA: Escribe una descripción atractiva (máx 40 palabras).
+            REGLAS OBLIGATORIAS:
+            1. NO incluyas saludos, introducciones ni explicaciones (Ej: "Aquí tienes", "Claro").
+            2. Empieza DIRECTAMENTE con la primera palabra de la descripción.
+            3. Devuelve SOLO el texto final limpio.
+            """
             response = model.generate_content(prompt)
-            return response.text.strip()
+            # Limpieza extra por si acaso
+            return response.text.strip().replace('"', '').replace("Here is a description:", "")
         except Exception as e:
             time.sleep(2)
             if intento == max_intentos - 1: return f"Error: {e}"
@@ -86,9 +97,18 @@ def procesar_vision(imagen_pil, tono, model):
     max_intentos = 3
     for intento in range(max_intentos):
         try:
-            prompt = f"Eres un experto en ventas. Mira este producto y escribe una descripción atractiva para venta online (máx 40 palabras). Tono: {tono}. Describe material y estilo visual."
+            # Prompt Estricto para Visión
+            prompt = f"""
+            Eres un sistema de etiquetado visual para tiendas online.
+            TONO: {tono}
+            TAREA: Analiza la imagen y escribe una descripción de venta (máx 40 palabras).
+            REGLAS OBLIGATORIAS:
+            1. PROHIBIDO saludar o usar frases como "¡Claro!", "Esta imagen muestra", "Aquí está".
+            2. Empieza DIRECTAMENTE describiendo el producto (Ej: "Camisa de algodón azul...").
+            3. Devuelve SOLO el texto de venta.
+            """
             response = model.generate_content([prompt, imagen_pil])
-            return response.text.strip()
+            return response.text.strip().replace('"', '').replace("Here is a description:", "")
         except Exception as e:
             time.sleep(2)
             if intento == max_intentos - 1: return f"Error IA: {e}"
@@ -158,12 +178,11 @@ def main():
                     progreso = st.progress(0)
                     res = []
                     
-                    # --- ACTUALIZACIÓN A GEMINI 2.5 FLASH ---
-                    # Si 'gemini-2.5-flash' da error, intenta 'gemini-1.5-flash-latest' como fallback
+                    # Selección de Modelo (Intenta 2.5, baja a 1.5 si falla)
                     try:
                         model = genai.GenerativeModel('gemini-2.5-flash')
                     except:
-                        st.warning("Modelo 2.5 no detectado, usando 1.5-flash...")
+                        st.warning("Modelo 2.5 no disponible, usando 1.5-flash...")
                         model = genai.GenerativeModel('gemini-1.5-flash')
 
                     for i, row in df.iterrows():
@@ -184,11 +203,11 @@ def main():
                     res = []
                     preview_img = st.empty()
                     
-                    # --- ACTUALIZACIÓN A GEMINI 2.5 FLASH ---
+                    # Selección de Modelo (Intenta 2.5, baja a 1.5 si falla)
                     try:
                         model = genai.GenerativeModel('gemini-2.5-flash')
                     except:
-                        st.warning("Modelo 2.5 no detectado, usando 1.5-flash...")
+                        st.warning("Modelo 2.5 no disponible, usando 1.5-flash...")
                         model = genai.GenerativeModel('gemini-1.5-flash')
 
                     for i, row in df.iterrows():
