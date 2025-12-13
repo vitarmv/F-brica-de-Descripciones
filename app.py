@@ -7,6 +7,8 @@ import requests
 import re
 import unicodedata
 import os
+import html # NUEVO: Para entidades como &nbsp;
+import ftfy # NUEVO: Para arreglar texto roto (EnvÃ­o -> Envío)
 from PIL import Image
 
 # --- CONFIGURACIÓN DE PÁGINA ---
@@ -40,12 +42,25 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = os.getenv("GEMINI_API_KEY")
 
-# --- FUNCIONES DE UTILIDAD ---
+# --- FUNCIONES DE UTILIDAD MEJORADAS ---
 def limpiar_texto(texto):
+    """Limpieza profunda: HTML, Entidades (&nbsp;) y Codificación (ftfy)."""
     if not isinstance(texto, str): return ""
-    clean = re.sub('<.*?>', '', texto)
-    clean = re.sub('\s+', ' ', clean).strip()
-    return clean
+    
+    # 1. Arreglar codificación rota (ej: EnvÃ­o -> Envío)
+    texto = ftfy.fix_text(texto)
+    
+    # 2. Decodificar entidades HTML (ej: &nbsp; -> espacio, &amp; -> &)
+    texto = html.unescape(texto)
+    
+    # 3. Eliminar etiquetas HTML estrictas (<...>)
+    texto = re.sub(r'<[^>]+>', ' ', texto) 
+    
+    # 4. Eliminar espacios invisibles y duplicados
+    texto = texto.replace('\xa0', ' ') # El &nbsp; se convierte en \xa0, hay que quitarlo
+    texto = re.sub(r'\s+', ' ', texto).strip()
+    
+    return texto
 
 def generar_handle(texto):
     if not isinstance(texto, str): return ""
@@ -66,24 +81,22 @@ def descargar_imagen_pil(url):
         return None
     return None
 
-# --- FUNCIONES DE IA (CON PROMPTS ESTRICTOS "ANTI-CHAT") ---
+# --- FUNCIONES DE IA (PROMPTS ESTRICTOS) ---
 def procesar_texto(producto, tono, model):
     max_intentos = 3
     for intento in range(max_intentos):
         try:
-            # Prompt Estricto para Texto
             prompt = f"""
             Eres un motor de redacción para E-commerce.
             INPUT: {producto}
             TONO: {tono}
             TAREA: Escribe una descripción atractiva (máx 40 palabras).
             REGLAS OBLIGATORIAS:
-            1. NO incluyas saludos, introducciones ni explicaciones (Ej: "Aquí tienes", "Claro").
+            1. NO incluyas saludos, introducciones ni explicaciones.
             2. Empieza DIRECTAMENTE con la primera palabra de la descripción.
             3. Devuelve SOLO el texto final limpio.
             """
             response = model.generate_content(prompt)
-            # Limpieza extra por si acaso
             return response.text.strip().replace('"', '').replace("Here is a description:", "")
         except Exception as e:
             time.sleep(2)
@@ -97,14 +110,13 @@ def procesar_vision(imagen_pil, tono, model):
     max_intentos = 3
     for intento in range(max_intentos):
         try:
-            # Prompt Estricto para Visión
             prompt = f"""
             Eres un sistema de etiquetado visual para tiendas online.
             TONO: {tono}
             TAREA: Analiza la imagen y escribe una descripción de venta (máx 40 palabras).
             REGLAS OBLIGATORIAS:
-            1. PROHIBIDO saludar o usar frases como "¡Claro!", "Esta imagen muestra", "Aquí está".
-            2. Empieza DIRECTAMENTE describiendo el producto (Ej: "Camisa de algodón azul...").
+            1. PROHIBIDO saludar o usar frases como "¡Claro!", "Esta imagen muestra".
+            2. Empieza DIRECTAMENTE describiendo el producto.
             3. Devuelve SOLO el texto de venta.
             """
             response = model.generate_content([prompt, imagen_pil])
@@ -149,7 +161,7 @@ def main():
     elif modo == "🔍 Auditor de Imágenes":
         st.sidebar.info("Verifica que los enlaces no den error 404.")
     elif modo == "🧹 Limpiador CSV":
-        st.sidebar.info("Genera Handles y limpia HTML sucio.")
+        st.sidebar.info("Genera Handles, limpia HTML sucio y arregla texto roto.")
 
     # Configurar API Key
     usando_ia = modo in ["📝 Generador de Texto", "👁️ Generador por Visión"]
@@ -178,11 +190,10 @@ def main():
                     progreso = st.progress(0)
                     res = []
                     
-                    # Selección de Modelo (Intenta 2.5, baja a 1.5 si falla)
                     try:
                         model = genai.GenerativeModel('gemini-2.5-flash')
                     except:
-                        st.warning("Modelo 2.5 no disponible, usando 1.5-flash...")
+                        st.warning("Usando gemini-1.5-flash...")
                         model = genai.GenerativeModel('gemini-1.5-flash')
 
                     for i, row in df.iterrows():
@@ -203,11 +214,10 @@ def main():
                     res = []
                     preview_img = st.empty()
                     
-                    # Selección de Modelo (Intenta 2.5, baja a 1.5 si falla)
                     try:
                         model = genai.GenerativeModel('gemini-2.5-flash')
                     except:
-                        st.warning("Modelo 2.5 no disponible, usando 1.5-flash...")
+                        st.warning("Usando gemini-1.5-flash...")
                         model = genai.GenerativeModel('gemini-1.5-flash')
 
                     for i, row in df.iterrows():
