@@ -10,6 +10,7 @@ import os
 import html 
 import ftfy 
 from PIL import Image
+from bs4 import BeautifulSoup  # <--- NUEVA LIBRERÍA AGREGADA
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Bulk AI Processor", page_icon="✨", layout="wide")
@@ -70,6 +71,48 @@ def descargar_imagen_pil(url):
     except Exception:
         return None
     return None
+
+# --- NUEVA FUNCIÓN: SCRAPER WEB ---
+def escanear_web(url_base):
+    """
+    Entra a una URL y extrae todas las etiquetas <img>
+    Devuelve un DataFrame listo para auditar.
+    """
+    try:
+        # Headers para parecer un navegador real y no ser bloqueado
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        response = requests.get(url_base, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            return None, f"Error al acceder: Status {response.status_code}"
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        imagenes = soup.find_all('img')
+        
+        lista_imgs = []
+        for img in imagenes:
+            src = img.get('src')
+            if src:
+                # Arreglar URLs relativas (ej: //cdn.shopify...) que usan muchas tiendas
+                if src.startswith('//'):
+                    src = 'https:' + src
+                elif src.startswith('/'):
+                    src = url_base.rstrip('/') + src
+                
+                # Filtrar iconos muy pequeños o basura (opcional pero recomendado)
+                if not src.endswith('.svg'): 
+                    lista_imgs.append(src)
+        
+        # Crear DataFrame
+        if not lista_imgs:
+            return None, "No se encontraron imágenes o la web bloquea el acceso."
+            
+        df_web = pd.DataFrame(lista_imgs, columns=['URL_Imagen'])
+        df_web = df_web.drop_duplicates() # Eliminar repetidas
+        return df_web, "Ok"
+        
+    except Exception as e:
+        return None, f"Error técnico: {e}"
 
 # --- FUNCIONES DE IA (PROMPTS DINÁMICOS POR IDIOMA) ---
 def procesar_texto(producto, tono, model, idioma):
@@ -171,7 +214,7 @@ def main():
     
     st.sidebar.header("🛠️ Panel de Control")
     
-    # NUEVO: SELECTOR DE IDIOMA
+    # SELECTOR DE IDIOMA
     idioma_salida = st.sidebar.selectbox(
         "🏳️ Idioma de Salida / Output Language",
         ["English (Professional US)", "Español (Neutro)"]
@@ -179,7 +222,7 @@ def main():
 
     modo = st.sidebar.radio(
         "Selecciona una herramienta:",
-        ("📝 Generador de Texto", "👁️ Generador por Visión", "🔍 Auditor de Imágenes", "🧹 Limpiador CSV"),
+        ("🌐 Extractor Web (Beta)", "📝 Generador de Texto", "👁️ Generador por Visión", "🔍 Auditor de Imágenes", "🧹 Limpiador CSV"),
         key="navegacion_principal"
     )
 
@@ -194,6 +237,8 @@ def main():
         st.sidebar.info("Verifica que los enlaces no den error 404.")
     elif modo == "🧹 Limpiador CSV":
         st.sidebar.info("Genera Handles, limpia HTML sucio y arregla texto roto.")
+    elif modo == "🌐 Extractor Web (Beta)":
+        st.sidebar.info("Extrae todas las imágenes de una web pública para auditarlas.")
 
     # Configurar API Key
     usando_ia = modo in ["📝 Generador de Texto", "👁️ Generador por Visión"]
@@ -203,6 +248,37 @@ def main():
             return
         genai.configure(api_key=api_key)
 
+    # --- MÓDULO NUEVO: EXTRACTOR WEB (Sin subir archivo) ---
+    if modo == "🌐 Extractor Web (Beta)":
+        st.subheader("🕵️ Espía de Imágenes (Scraper)")
+        st.markdown("""
+        **Instrucciones para conseguir clientes:**
+        1. Busca una tienda Shopify (ej. `tienda.com/collections/all`).
+        2. Pega la URL aquí abajo.
+        3. Descarga el Excel y pásalo por el **Auditor de Imágenes**.
+        """)
+        
+        url_objetivo = st.text_input("URL de la Colección o Tienda:")
+        
+        if st.button("🕷️ Extraer Imágenes"):
+            if not url_objetivo:
+                st.warning("Por favor escribe una URL.")
+            else:
+                with st.spinner(f"Escaneando {url_objetivo}... esto puede tardar unos segundos."):
+                    df_web, mensaje = escanear_web(url_objetivo)
+                    
+                    if df_web is not None:
+                        st.success(f"¡Éxito! Se encontraron {len(df_web)} imágenes únicas.")
+                        st.dataframe(df_web.head(), use_container_width=True)
+                        
+                        st.markdown("### 👇 Siguiente Paso")
+                        st.write("Descarga este archivo y súbelo al módulo '🔍 Auditor de Imágenes' para encontrar errores 404.")
+                        descargar_excel(df_web, "imagenes_extraidas.xlsx")
+                    else:
+                        st.error(f"Error: {mensaje}")
+        return # Termina aquí para no mostrar el uploader de abajo
+
+    # --- CARGA DE ARCHIVOS PARA EL RESTO DE MÓDULOS ---
     uploaded_file = st.file_uploader("Sube tu archivo (Excel/CSV)", type=['csv', 'xlsx'])
 
     if uploaded_file is not None:
@@ -230,13 +306,12 @@ def main():
                         model = genai.GenerativeModel('gemini-1.5-flash')
 
                     for i, row in df.iterrows():
-                        # AQUI PASAMOS EL IDIOMA
                         res.append(procesar_texto(row[col_prod], tono, model, idioma_salida))
                         progreso.progress((i+1)/len(df))
                     df['Desc_IA'] = res
                     descargar_excel(df, "descripciones_texto.xlsx")
 
-            # --- MÓDULO 4: VISIÓN ---
+            # --- MÓDULO 2: VISIÓN ---
             elif modo == "👁️ Generador por Visión":
                 st.subheader("Generación 'Mirando' la Foto")
                 col_url = st.selectbox("Columna URLs Imagen:", df.columns)
@@ -261,7 +336,6 @@ def main():
                         
                         if img:
                             preview_img.image(img, caption=f"Procesando producto {i+1}", width=150)
-                            # AQUI PASAMOS EL IDIOMA
                             desc = procesar_vision(img, tono, model, idioma_salida)
                         else:
                             desc = "Error: Imagen inaccesible"
@@ -274,7 +348,7 @@ def main():
                     preview_img.empty()
                     descargar_excel(df, "descripciones_visuales.xlsx")
 
-            # --- MÓDULO 2: AUDITOR ---
+            # --- MÓDULO 3: AUDITOR ---
             elif modo == "🔍 Auditor de Imágenes":
                 st.subheader("Auditoría de Enlaces")
                 col_url = st.selectbox("Columna URLs:", df.columns)
@@ -287,7 +361,7 @@ def main():
                     df['Estado_Img'] = res
                     descargar_excel(df, "reporte_auditoria.xlsx")
 
-            # --- MÓDULO 3: LIMPIADOR ---
+            # --- MÓDULO 4: LIMPIADOR ---
             elif modo == "🧹 Limpiador CSV":
                 st.subheader("Limpieza Shopify")
                 col_tit = st.selectbox("Columna Títulos:", df.columns)
