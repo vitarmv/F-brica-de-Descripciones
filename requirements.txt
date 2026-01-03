@@ -5,3 +5,4 @@ requests
 openpyxl
 Pillow
 ftfy
+beautifulsoup4
